@@ -1,6 +1,7 @@
 const logModel = require('../models/log.model');
-const { verifyLogHash } = require('../services/verify.service');
+
 const logger = require('../config/logger');
+const { verifyLogHash, verifyChain } = require('../services/verify.service');
 /**
  * GET /log/:id
  *
@@ -53,6 +54,49 @@ async function getLogWithStatus(req, res, next) {
   }
 }
 
+
+/**
+ * GET /verify
+ *
+ * Flow:
+ *   Fetch ALL logs (model, ascending order)
+ *     -> verify.service.verifyChain() loops through them
+ *     -> Return PASS/FAIL result
+ *
+ * The controller stays thin: fetch, delegate, respond. All the
+ * looping/hash/chain-check logic lives in verify.service.js.
+ */
+async function verifyChainHandler(req, res, next) {
+    try {
+      const logs = await logModel.getAllLogsOrdered();
+      const result = verifyChain(logs);
+   
+      if (result.status === 'PASS') {
+        logger.info(
+          { result: result.status, entriesVerified: result.entriesVerified },
+          'Chain verification completed'
+        );
+      } else {
+        // A broken chain means tampering was detected — log at error level
+        // so it surfaces in alerting/monitoring, not buried in routine info logs.
+        logger.error(
+          {
+            result: result.status,
+            entriesVerified: result.entriesVerified,
+            brokenEntryId: result.brokenEntryId,
+            reason: result.reason,
+          },
+          'Chain verification FAILED — tampering detected'
+        );
+      }
+
+      return res.status(200).json(result);
+    } catch (err) {
+      return next(err);
+    }
+  }
+   
 module.exports = {
   getLogWithStatus,
+  verifyChain: verifyChainHandler,
 };

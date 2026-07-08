@@ -111,9 +111,84 @@ async function getAllLogs({ actor, limit = 100, offset = 0 } = {}) {
   return rows;
 }
 
-module.exports = {
-  getLatestLog,
-  createLog,
-  getLogById,
-  getAllLogs,
-};
+
+/**
+ * Fetch ALL log entries, unpaginated, ordered ascending by id.
+ *
+ * Used by chain verification (GET /verify), which must walk every
+ * entry from the first to the last — pagination would break that.
+ * Kept separate from getAllLogs() (which is paginated, for listing UIs).
+ *
+ * @returns {Promise<Object[]>} every log row, oldest first.
+ */
+async function getAllLogsOrdered() {
+    const { rows } = await pool.query(
+      `SELECT id, actor, action, payload, previous_hash, current_hash, created_at
+       FROM logs
+       ORDER BY id ASC`
+    );
+    return rows;
+  }
+
+
+
+
+  /**
+ * Fetch log entries filtered by actor and/or a created_at date range,
+ * ordered by created_at ascending. Used by GET /export.
+ *
+ * Builds the WHERE clause dynamically so callers can pass any
+ * combination of filters (none, actor only, dates only, or both)
+ * without needing a separate hand-written query for each case.
+ * Still fully parameterized — no string interpolation of values.
+ *
+ * @param {Object} [filters]
+ * @param {string|null} [filters.actor] - exact actor match.
+ * @param {string|null} [filters.startDate] - ISO date/timestamp, inclusive lower bound.
+ * @param {string|null} [filters.endDate] - ISO date/timestamp, inclusive upper bound.
+ * @returns {Promise<Object[]>} matching log rows, oldest first.
+ */
+async function getFilteredLogs({ actor, startDate, endDate } = {}) {
+    const conditions = [];
+    const values = [];
+   
+    if (actor) {
+      values.push(actor);
+      conditions.push(`actor = $${values.length}`);
+    }
+   
+    if (startDate && endDate) {
+      values.push(startDate, endDate);
+      conditions.push(`created_at BETWEEN $${values.length - 1} AND $${values.length}`);
+    } else if (startDate) {
+      values.push(startDate);
+      conditions.push(`created_at >= $${values.length}`);
+    } else if (endDate) {
+      values.push(endDate);
+      conditions.push(`created_at <= $${values.length}`);
+    }
+   
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+   
+    const { rows } = await pool.query(
+      `SELECT id, actor, action, payload, previous_hash, current_hash, created_at
+       FROM logs
+       ${whereClause}
+       ORDER BY created_at ASC`,
+      values
+    );
+    return rows;
+  }
+   
+  module.exports = {
+    getLatestLog,
+    createLog,
+    getLogById,
+    getAllLogs,
+    getAllLogsOrdered,
+    getFilteredLogs,
+  };
+
+
+
+
