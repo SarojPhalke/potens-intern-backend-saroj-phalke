@@ -107,8 +107,8 @@ SHA256(
     actor +
     action +
     payload +
-    previous_hash +
-    created_at
+    previous_hash 
+    
 )
 ```
 
