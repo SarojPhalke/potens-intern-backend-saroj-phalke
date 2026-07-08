@@ -1,0 +1,28 @@
+{
+  "name": "tamper-evident-append-only-log-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "verify": "node scripts/verify.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "pg": "^8.22.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14",
+    "pino-pretty": "^13.1.3"
+  }
+}

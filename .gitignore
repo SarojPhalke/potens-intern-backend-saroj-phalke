@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+
+# Logs
+*.log
+logs/
+
+# Runtime files
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# npm cache
+.npm/
+
+# Temporary files
+tmp/
+temp/
+
+# dotenvx (if used)
+.env.keys
