@@ -97,7 +97,12 @@ SHA256(
     actor +
     action +
     payload +
+<<<<<<< HEAD
     previous_hash
+=======
+    previous_hash 
+    
+>>>>>>> f96f36a193b68dfb89dd1eec5d58d019f3c893ec
 )
 ```
 
