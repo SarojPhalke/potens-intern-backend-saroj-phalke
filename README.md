@@ -22,6 +22,7 @@ A secure, append-only audit logging service built with **Node.js**, **Express.js
 ## Stretch Goal Implemented
 
 * Merkle-tree style batch verification for faster integrity checks
+* CLI verification command (`npm run verify`) for running full chain verification without starting the HTTP server
 
 ---
 
@@ -97,12 +98,8 @@ SHA256(
     actor +
     action +
     payload +
-<<<<<<< HEAD
     previous_hash
-=======
-    previous_hash 
-    
->>>>>>> f96f36a193b68dfb89dd1eec5d58d019f3c893ec
+
 )
 ```
 
@@ -254,7 +251,14 @@ Example response:
   "brokenEntryId": 42
 }
 ```
+# CLI Verification
 
+The project includes a command-line interface (CLI) that allows administrators to verify the integrity of the audit log directly from the terminal without making an HTTP request.
+
+Run:
+
+```bash
+npm run verify
 ---
 
 # Merkle-Style Batch Verification
@@ -312,6 +316,7 @@ The batch hashes are then combined to produce a Merkle Root.
 ```
 
 ---
+
 
 ## Optimized Verification Flow
 
@@ -629,7 +634,6 @@ Merkle-style batching reduces verification work by checking batch hashes first a
 
 # Future Improvements
 
-* CLI verification command (`npm run verify`)
 * Docker Compose deployment
 
 
