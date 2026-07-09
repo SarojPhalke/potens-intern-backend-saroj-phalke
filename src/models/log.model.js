@@ -82,6 +82,8 @@ async function getLogById(id) {
  * @param {number} [options.offset] - rows to skip (default 0).
  * @returns {Promise<Object[]>} array of log rows.
  */
+
+//not used this function (getAllLogs)in this project
 async function getAllLogs({ actor, limit = 100, offset = 0 } = {}) {
   const conditions = [];
   const values = [];
@@ -137,7 +139,7 @@ async function getAllLogsOrdered() {
  * Fetch log entries filtered by actor and/or a created_at date range,
  * ordered by created_at ascending. Used by GET /export.
  *
- * Builds the WHERE clause dynamically so callers can pass any
+ * Builds the WHERE clause **dynamically** so callers can pass any
  * combination of filters (none, actor only, dates only, or both)
  * without needing a separate hand-written query for each case.
  * Still fully parameterized — no string interpolation of values.
@@ -180,6 +182,27 @@ async function getFilteredLogs({ actor, startDate, endDate } = {}) {
     return rows;
   }
    
+
+  /**
+ * Fetch id + current_hash for a contiguous range of log ids, ascending.
+ * Used when a merkle batch completes and needs the hashes of the logs
+ * it covers.
+ *
+ * @param {number} startId
+ * @param {number} endId
+ * @returns {Promise<{id: number, current_hash: string}[]>}
+ */
+async function getHashesInRange(startId, endId) {
+    const { rows } = await pool.query(
+      `SELECT id, current_hash
+       FROM logs
+       WHERE id BETWEEN $1 AND $2
+       ORDER BY id ASC`,
+      [startId, endId]
+    );
+    return rows;
+  }
+
   module.exports = {
     getLatestLog,
     createLog,
@@ -187,6 +210,7 @@ async function getFilteredLogs({ actor, startDate, endDate } = {}) {
     getAllLogs,
     getAllLogsOrdered,
     getFilteredLogs,
+    getHashesInRange,
   };
 
 

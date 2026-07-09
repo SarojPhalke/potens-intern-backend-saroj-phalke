@@ -1,68 +1,87 @@
 # Tamper-Evident Append-Only Log Service
 
-A secure, append-only audit logging service built with **Node.js**, **Express.js**, and **PostgreSQL**. Every log entry is cryptographically linked to the previous entry using **SHA-256**, creating a tamper-evident hash chain. Once written, log entries cannot be modified or deleted, allowing third parties to verify the integrity of the audit trail.
+A secure, append-only audit logging service built with **Node.js**, **Express.js**, and **PostgreSQL**. Every audit event is cryptographically linked to the previous event using **SHA-256**, creating an immutable and tamper-evident hash chain. The service also supports **Merkle-style batch verification** to optimize integrity checks on large datasets.
 
 ---
 
-## Features
+# Features
+
+## Core Features
 
 * Append-only audit log
-* SHA-256 hash chaining for tamper detection
-* Chain verification endpoint
+* SHA-256 hash chaining
 * Individual log verification
+* Full chain verification
 * Filtered JSON export
 * API Key authentication
 * Rate limiting on log creation
-* Structured logging with Pino
-* PostgreSQL database
-* SQL migrations
+* Structured logging using Pino
+* PostgreSQL with SQL migrations
 * Centralized error handling
 
----
+## Stretch Goal Implemented
 
-## Tech Stack
-
-| Technology         | Purpose                         |
-| ------------------ | ------------------------------- |
-| Node.js            | Runtime                         |
-| Express.js         | REST API                        |
-| PostgreSQL         | Database                        |
-| pg                 | PostgreSQL Client               |
-| crypto             | SHA-256 Hash Generation         |
-| Pino               | Structured Logging              |
-| express-rate-limit | API Rate Limiting               |
-| dotenv             | Environment Variable Management |
+* Merkle-tree style batch verification for faster integrity checks
 
 ---
 
-## Project Structure
+# Tech Stack
+
+| Technology         | Purpose               |
+| ------------------ | --------------------- |
+| Node.js            | Runtime               |
+| Express.js         | REST API              |
+| PostgreSQL         | Database              |
+| pg                 | PostgreSQL Driver     |
+| crypto             | SHA-256 Hashing       |
+| Pino               | Structured Logging    |
+| express-rate-limit | Rate Limiting         |
+| dotenv             | Environment Variables |
+
+---
+
+# Project Architecture
 
 ```text
-tamper-evident-log-service/
-│
-├── src/
-│   ├── config/
-│   ├── controllers/
-│   ├── middleware/
-│   ├── models/
-│   ├── routes/
-│   ├── services/
-│   ├── utils/
-│   └── app.js
-│
-├── migrations/
-├── scripts/
-├── .env.example
-├── package.json
-├── server.js
-└── README.md
+                        Client
+                           │
+                           ▼
+                     Express Routes
+                           │
+        ┌──────────────────┼──────────────────┐
+        ▼                  ▼                  ▼
+ API Key Middleware   Rate Limiter     Logger Middleware
+        │                  │                  │
+        └──────────────────┼──────────────────┘
+                           ▼
+                      Controllers
+                           │
+                           ▼
+                        Services
+          ┌───────────────┼─────────────────┐
+          ▼               ▼                 ▼
+     Hash Service   Verify Service   Export Service
+          │               │
+          ▼               ▼
+                    Models (PostgreSQL)
+                           │
+                           ▼
+                     PostgreSQL Database
 ```
+
+The project follows a layered architecture:
+
+* **Routes** receive HTTP requests.
+* **Middleware** handles authentication, rate limiting, request logging, and errors.
+* **Controllers** coordinate requests and responses.
+* **Services** contain business logic.
+* **Models** interact with PostgreSQL.
 
 ---
 
-## How It Works
+# Hash Chain Design
 
-Every audit log contains:
+Every log entry stores:
 
 * Actor
 * Action
@@ -71,167 +90,373 @@ Every audit log contains:
 * Previous Hash
 * Current Hash
 
-Each newly created log references the hash of the previous log.
+Hash generation:
 
-```
-Log 1
-Previous Hash: NULL
-Current Hash : H1
-        │
-        ▼
-Log 2
-Previous Hash: H1
-Current Hash : H2
-        │
-        ▼
-Log 3
-Previous Hash: H2
-Current Hash : H3
-        │
-        ▼
-Log 4
-Previous Hash: H3
-Current Hash : H4
-```
-
-If any stored log is modified after creation, its computed SHA-256 hash no longer matches the stored hash, breaking the chain and making tampering immediately detectable.
-
----
-
-## SHA-256 Hash Generation
-
-Each log's hash is generated using:
-
-```
+```text
 SHA256(
     actor +
     action +
     payload +
-    previous_hash +
-    created_at
+    previous_hash
 )
 ```
 
-The resulting digest becomes the `current_hash` for that log and is stored in the database.
+Example chain:
+
+```text
+Log 1
+
+Previous Hash = NULL
+Current Hash  = H1
+
+        │
+
+        ▼
+
+Log 2
+
+Previous Hash = H1
+Current Hash  = H2
+
+        │
+
+        ▼
+
+Log 3
+
+Previous Hash = H2
+Current Hash  = H3
+
+        │
+
+        ▼
+
+Log 4
+
+Previous Hash = H3
+Current Hash  = H4
+```
+
+Because each hash depends on the previous log, changing any log breaks every subsequent link in the chain.
 
 ---
 
-## API Endpoints
+# Tamper Detection
 
-### Create Log
+Suppose someone changes the action in Log 3.
 
-**POST** `/log`
+Original:
 
-Creates a new immutable audit log entry.
+```text
+Action = CREATE_USER
+Hash = H3
+```
 
-Request Body
+Tampered:
 
-```json
-{
-  "actor": "Admin",
-  "action": "CREATE_USER",
-  "payload": {
-    "username": "john"
-  }
-}
+```text
+Action = DELETE_USER
+```
+
+Recomputing the SHA-256 hash produces a different value.
+
+```text
+Computed Hash ≠ Stored Hash
+```
+
+The verification immediately fails because the log has been modified after creation.
+
+---
+
+# Verification Algorithm
+
+## Individual Verification
+
+`GET /log/:id`
+
+The endpoint:
+
+1. Retrieves the requested log.
+2. Recomputes its SHA-256 hash.
+3. Compares the computed hash with the stored `current_hash`.
+
+If they match:
+
+```text
+Hash Valid = TRUE
+```
+
+Otherwise:
+
+```text
+Hash Valid = FALSE
 ```
 
 ---
 
-### Get Log by ID
+## Full Chain Verification
 
-**GET** `/log/:id`
+`GET /verify`
 
-Retrieves a single log entry and validates its stored hash against a newly computed hash.
+The service verifies every log in chronological order.
 
-Example Response
+Algorithm:
 
-```json
-{
-  "success": true,
-  "hashValid": true,
-  "data": {
-    ...
-  }
-}
+```text
+Fetch Logs
+
+↓
+
+For each log
+
+↓
+
+Recompute SHA-256
+
+↓
+
+Compare with stored hash
+
+↓
+
+Verify previous_hash matches previous current_hash
+
+↓
+
+Continue
+
+↓
+
+PASS
 ```
 
----
+If any verification fails:
 
-### Verify Entire Chain
+```text
+STOP
 
-**GET** `/verify`
+↓
 
-Scans every log in chronological order.
-
-For each log it verifies:
-
-* The recomputed SHA-256 hash matches the stored hash.
-* The `previous_hash` matches the previous log's `current_hash`.
-
-Example Success Response
-
-```json
-{
-  "success": true,
-  "status": "PASS",
-  "entriesVerified": 125
-}
+Return first broken entry
 ```
 
-Example Failure Response
+Example response:
 
 ```json
 {
   "success": false,
   "status": "FAIL",
-  "brokenEntryId": 57
+  "brokenEntryId": 42
 }
 ```
 
 ---
 
-### Export Logs
+# Merkle-Style Batch Verification
 
-**GET** `/export`
+To improve verification performance for large datasets, the project implements **Merkle-style batching**.
 
-Exports logs as JSON.
+Instead of verifying every log individually on every request, logs are grouped into fixed-size batches.
 
-Supports filtering using query parameters:
+Example:
 
-* actor
-* startDate
-* endDate
+```text
+Batch 1
 
-Example
+Logs 1 - 100
 
+↓
+
+Batch Hash 1
+
+──────────────────────────
+
+Batch 2
+
+Logs 101 - 200
+
+↓
+
+Batch Hash 2
+
+──────────────────────────
+
+Batch 3
+
+Logs 201 - 300
+
+↓
+
+Batch Hash 3
 ```
+
+Each batch hash is generated by combining the hashes of all logs in that batch.
+
+The batch hashes are then combined to produce a Merkle Root.
+
+```text
+                  Merkle Root
+
+                /            \
+
+         BatchHash1      BatchHash2
+
+          /      \         /      \
+
+       H1...H100      H101...H200
+```
+
+---
+
+## Optimized Verification Flow
+
+Instead of scanning every log:
+
+```text
+1
+
+↓
+
+2
+
+↓
+
+3
+
+↓
+
+...
+
+↓
+
+100000
+```
+
+The verifier first checks batch hashes.
+
+```text
+Verify Batch Hashes
+
+↓
+
+All Valid?
+
+↓
+
+YES
+
+↓
+
+PASS
+```
+
+If a batch fails:
+
+```text
+Locate Failed Batch
+
+↓
+
+Verify only logs in that batch
+
+↓
+
+Return first broken entry
+```
+
+This significantly reduces verification time on large audit logs.
+
+---
+
+# API Endpoints
+
+## Create Log
+
+```http
+POST /log
+```
+
+Request Body
+
+```json
+{
+    "actor":"Admin",
+    "action":"CREATE_USER",
+    "payload":{
+        "username":"john"
+    }
+}
+```
+
+Creates a new immutable audit log entry.
+
+---
+
+## Retrieve Log
+
+```http
+GET /log/:id
+```
+
+Returns a log entry along with its verification status.
+
+---
+
+## Verify Chain
+
+```http
+GET /verify
+```
+
+Scans the audit chain and reports whether it has been tampered with.
+
+---
+
+## Export Logs
+
+```http
+GET /export
+```
+
+Supports filtering using query parameters.
+
+Examples:
+
+```http
+GET /export?actor=Admin
+```
+
+```http
+GET /export?startDate=2026-07-01
+```
+
+```http
 GET /export?actor=Admin&startDate=2026-07-01&endDate=2026-07-31
 ```
 
 ---
 
-## Security
+# Security
 
-### API Key Authentication
+## API Key Authentication
 
-All endpoints are protected using an API Key middleware.
+All endpoints are protected using an API key.
 
 Clients must include:
 
-```
+```text
 x-api-key: YOUR_API_KEY
 ```
 
 ---
 
-### Rate Limiting
+## Rate Limiting
 
-The `POST /log` endpoint is protected using `express-rate-limit` to prevent abuse and excessive log creation.
+The `POST /log` endpoint is protected using **express-rate-limit** to prevent abuse.
 
 ---
 
-## Structured Logging
+# Structured Logging
 
 Application events are logged using **Pino**.
 
@@ -244,38 +469,35 @@ Logged events include:
 * Verification requests
 * Export requests
 * Authentication failures
-* Application errors
+* Rate limit violations
+* Unexpected application errors
 
-Business audit logs stored in PostgreSQL are completely separate from application logs generated by Pino.
+Pino logs are completely independent of the audit logs stored in PostgreSQL.
 
 ---
 
-## Error Handling
+# Error Handling
 
-A centralized Express error-handling middleware provides consistent API responses.
+Centralized Express error middleware provides consistent responses.
 
-Example
+Example:
 
 ```json
 {
-  "success": false,
-  "message": "Log not found"
+    "success":false,
+    "message":"Log not found"
 }
 ```
 
 ---
 
-## Database
+# Database Schema
 
-The project uses PostgreSQL with SQL migrations.
+## logs
 
-Primary table:
+Stores immutable audit entries.
 
-```
-logs
-```
-
-Important columns include:
+Key columns:
 
 * id
 * actor
@@ -285,22 +507,43 @@ Important columns include:
 * current_hash
 * created_at
 
+## merkle_batches
+
+Stores batch hashes used for optimized verification.
+
+Key columns:
+
+* id
+* start_log_id
+* end_log_id
+* batch_hash
+* created_at
+
 ---
 
-## Running the Project
+# Setup Instructions
 
-### Install dependencies
+## 1. Clone the repository
+
+```bash
+git clone <repository-url>
+
+cd tamper-evident-log-service
+```
+
+---
+
+## 2. Install dependencies
 
 ```bash
 npm install
 ```
 
-### Configure environment
+---
+
+## 3. Configure environment variables
 
 Create a `.env` file.
-u can directly copy paste the `.env.example` file .
-
-Example:
 
 ```env
 PORT=5000
@@ -311,45 +554,77 @@ DB_PORT=5432
 DB_USER=postgres
 DB_PASSWORD=your_password
 DB_NAME=tamper_log_db
-
+MERKLE_BATCH_SIZE=10
 API_KEY=my-super-secret-api-key
 ```
 
-### Run migrations
+---
 
-Execute the SQL migration inside the `migrations` directory to create the required database tables.
+## 4. Create PostgreSQL database
 
-### Start the server
+```sql
+CREATE DATABASE tamper_log_db;
+```
+
+---
+
+## 5. Run SQL migrations
+
+Execute all SQL files inside the `migrations` directory.
+
+---
+
+## 6. Start the application
 
 ```bash
 npm run dev
 ```
 
-The server starts on:
+Server:
 
-```
+```text
 http://localhost:5000
 ```
 
 ---
 
-## Design Principles
+# Design Decisions
 
-* Immutable audit records
-* Cryptographic integrity using SHA-256
-* Separation of concerns
-* Layered architecture
-* Centralized error handling
-* Parameterized SQL queries
-* Secure API access
-* Structured application logging
+## Why SHA-256?
+
+SHA-256 is a cryptographic hash function that is deterministic, collision-resistant, and widely used for integrity verification. Any modification to a log entry produces a completely different hash.
 
 ---
 
-## Future Enhancements
+## Why an Append-Only Design?
 
-The following improvements are planned:
+Audit logs should never be modified or deleted. This guarantees historical integrity and ensures every action remains traceable.
 
-* Merkle-tree style batch verification
-* CLI verification tool
+---
+
+## Why Layered Architecture?
+
+Separating routes, controllers, services, models, and middleware improves maintainability, readability, and testability.
+
+---
+
+## Why Pino?
+
+Pino provides high-performance structured logging suitable for production applications while keeping business audit logs separate from application logs.
+
+---
+
+## Why Merkle-Style Batching?
+
+Sequential verification requires scanning every log.
+
+Merkle-style batching reduces verification work by checking batch hashes first and only inspecting individual logs when a batch fails, improving scalability for large datasets.
+
+---
+
+# Future Improvements
+
+* CLI verification command (`npm run verify`)
 * Docker Compose deployment
+
+
