@@ -598,6 +598,185 @@ http://localhost:5000
 
 ---
 
+## Run with Docker Compose (stretch)
+
+This starts both the API and PostgreSQL together, with migrations applied automatically on first run.
+
+```bash
+docker compose up --build
+```
+
+That single command will:
+1. Build the Node.js API image
+2. Start PostgreSQL and wait until it's healthy
+3. Run the SQL files in `migrations/` automatically (only on a fresh database volume)
+4. Start the API, connected to the database
+
+The API will be available at `http://localhost:5000`.
+
+### Environment variables
+
+Docker Compose reads a `.env` file in the project root for variable substitution. Copy `.env.example` to `.env` and fill in real values (especially `API_KEY`) before running.
+
+### Re-running migrations
+
+Migrations only auto-run against an **empty** database volume — this is intentional, so they never silently re-run against existing data. If you add a new migration file later and need to apply it to an existing database:
+
+```bash
+docker compose exec postgres psql -U postgres -d tamper_log_db -f /docker-entrypoint-initdb.d/002_create_merkle_batches.sql
+```
+
+Or, to start completely fresh (⚠️ deletes all data):
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+### Stopping
+
+```bash
+docker compose down
+```
+
+
+
+## API Testing
+
+All endpoints require an `x-api-key` header. Set your key in `.env` as `API_KEY` — the examples below use `ABCD1234` as a placeholder; replace it with your actual key.
+
+Base URL (local or Docker Compose): `http://localhost:5000`
+
+---
+
+### POST /log
+
+Creates a new tamper-evident log entry. The server computes `previous_hash` and `current_hash` automatically — you only supply `actor`, `action`, and `payload`.
+
+```bash
+curl -s -X POST "http://localhost:5000/log" \
+  -H "x-api-key: ABCD1234" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "actor": "Admin",
+    "action": "LOGIN",
+    "payload": { "ip": "192.168.1.10", "device": "Chrome/MacOS" }
+  }'
+```
+
+**Response `201 Created`:**
+```json
+{
+  "data": {
+    "id": "1",
+    "actor": "Admin",
+    "action": "LOGIN",
+    "payload": { "ip": "192.168.1.10", "device": "Chrome/MacOS" },
+    "previous_hash": null,
+    "current_hash": "a1b2c3...",
+    "created_at": "2026-07-09T10:15:00.000Z"
+  },
+  "batch": null
+}
+```
+
+`batch` is populated (instead of `null`) whenever this insert completes a batch of 10 logs (see [Merkle Batching](#merkle-batching) below).
+
+---
+
+### GET /log/:id
+
+Fetches a single log entry and verifies its hash against a fresh recomputation.
+
+```bash
+curl -s -X GET "http://localhost:5000/log/1" \
+  -H "x-api-key: ABCD1234"
+```
+
+**Response `200 OK`:**
+```json
+{
+  "data": { "id": "1", "actor": "Admin", "action": "LOGIN", "...": "..." },
+  "verification": {
+    "is_valid": true,
+    "expected_hash": "a1b2c3...",
+    "stored_hash": "a1b2c3..."
+  }
+}
+```
+
+`404` if the id doesn't exist.
+
+---
+
+### GET /verify
+
+Scans the **entire chain**, checking every entry's hash integrity and its link to the previous entry. Stops at the first broken entry.
+
+```bash
+curl -s -X GET "http://localhost:5000/verify" \
+  -H "x-api-key: ABCD1234"
+```
+
+**Response — chain intact:**
+```json
+{ "status": "PASS", "entriesVerified": 30 }
+```
+
+**Response — tampering detected:**
+```json
+{
+  "status": "FAIL",
+  "entriesVerified": 14,
+  "brokenEntryId": 15,
+  "reason": "hash_mismatch"
+}
+```
+(`reason` is either `hash_mismatch` — an entry's own data was altered — or `chain_link_mismatch` — an entry's `previous_hash` doesn't match the prior entry, e.g. from a deleted/reordered row.)
+
+You can also run this check from the command line, without going through the API:
+```bash
+npm run verify
+```
+
+---
+
+### GET /export
+
+Returns a filtered JSON export by actor and/or date range. All filters are optional and combinable.
+
+```bash
+# Export everything
+curl -s -X GET "http://localhost:5000/export" \
+  -H "x-api-key: ABCD1234"
+
+# Filter by actor
+curl -s -X GET "http://localhost:5000/export?actor=Admin" \
+  -H "x-api-key: ABCD1234"
+
+# Filter by date range
+curl -s -X GET "http://localhost:5000/export?startDate=2026-07-01&endDate=2026-07-31" \
+  -H "x-api-key: ABCD1234"
+
+# Combine filters
+curl -s -X GET "http://localhost:5000/export?actor=Admin&startDate=2026-07-01&endDate=2026-07-31" \
+  -H "x-api-key: ABCD1234"
+```
+
+**Response `200 OK`:**
+```json
+{
+  "success": true,
+  "count": 2,
+  "filters": { "actor": "Admin", "startDate": "2026-07-01", "endDate": "2026-07-31" },
+  "data": [ ... ]
+}
+```
+
+---
+  # Docker Compose
+  docker compose logs -f app
+```
+
 # Design Decisions
 
 ## Why SHA-256?

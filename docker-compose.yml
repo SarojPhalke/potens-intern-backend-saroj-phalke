@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: tamper_log_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-tamper_log_db}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      # Persistent volume — data survives container restarts/rebuilds.
+      # NOTE: Postgres 18+ images expect a single mount at
+      # /var/lib/postgresql (not .../data) — the image manages a
+      # version-specific subdirectory underneath it itself. Mounting
+      # directly at .../data (the pre-18 convention) causes the
+      # container to refuse to start.
+      - pg_data:/var/lib/postgresql
+      # The official postgres image auto-runs any .sql/.sh files found
+      # here, in filename order, but ONLY on first init (i.e. only
+      # when the data volume is empty). This is what makes migrations
+      # "automatic" on a fresh `docker compose up` without risking a
+      # re-run against an existing database on subsequent starts.
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-tamper_log_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tamper_log_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        # Waits for the healthcheck above to pass, not just for the
+        # container to start — avoids the classic "app boots before
+        # DB is ready to accept connections" race condition.
+        condition: service_healthy
+    environment:
+      # Inside Docker's network, containers reach each other by
+      # service name, not localhost — "postgres" here refers to the
+      # postgres service defined above. This overrides whatever
+      # DB_HOST is set to in your local .env (likely "localhost").
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-tamper_log_db}
+      API_KEY: ${API_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MERKLE_BATCH_SIZE: ${MERKLE_BATCH_SIZE:-10}
+      PORT: 5000
+      NODE_ENV: production
+    ports:
+      - "5000:5000"
+
+volumes:
+  pg_data:
