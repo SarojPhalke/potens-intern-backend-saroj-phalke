@@ -58,7 +58,36 @@ function getBatchRangeIfComplete(latestLogId) {
   return { startId, endId, batchSize };
 }
 
+/**
+ * Build a Merkle root from an ordered array of batch hashes, using
+ * standard pairwise combination. If a level has an odd number of
+ * nodes, the last one is paired with itself (standard convention).
+ *
+ * @param {string[]} batchHashes - ordered batch_hash values.
+ * @returns {string} the Merkle root.
+ */
+function computeMerkleRoot(batchHashes) {
+  if (!Array.isArray(batchHashes) || batchHashes.length === 0) {
+    throw new Error('computeMerkleRoot requires at least one batch hash');
+  }
+
+  let level = [...batchHashes];
+
+  while (level.length > 1) {
+    const nextLevel = [];
+    for (let i = 0; i < level.length; i += 2) {
+      const left = level[i];
+      const right = i + 1 < level.length ? level[i + 1] : level[i]; // duplicate if odd
+      nextLevel.push(sha256(left + right));
+    }
+    level = nextLevel;
+  }
+
+  return level[0]; // the root
+}
+
 module.exports = {
+  computeMerkleRoot,
   computeBatchHash,
   getBatchRangeIfComplete,
   getBatchSize,

@@ -203,6 +203,17 @@ async function getHashesInRange(startId, endId) {
     return rows;
   }
 
+async function getLogsInRange(startId, endId) {
+  const { rows } = await pool.query(
+    `SELECT id, actor, action, payload, previous_hash, current_hash, created_at
+     FROM logs
+     WHERE id BETWEEN $1 AND $2
+     ORDER BY id ASC`,
+    [startId, endId]
+  );
+  return rows;
+}
+
   module.exports = {
     getLatestLog,
     createLog,
@@ -211,6 +222,7 @@ async function getHashesInRange(startId, endId) {
     getAllLogsOrdered,
     getFilteredLogs,
     getHashesInRange,
+    getLogsInRange,
   };
 
 

@@ -1,7 +1,7 @@
 const logModel = require('../models/log.model');
 
 const logger = require('../config/logger');
-const { verifyLogHash, verifyChain } = require('../services/verify.service');
+const { verifyLogHash, verifyChain ,verifyChainWithMerkle } = require('../services/verify.service');
 /**
  * GET /log/:id
  *
@@ -95,8 +95,60 @@ async function verifyChainHandler(req, res, next) {
       return next(err);
     }
   }
+
+  /**
+ * GET /verify/fast
+ *
+ * Same PASS/FAIL contract as GET /verify, but uses merkle batches to
+ * skip per-log verification for any batch whose stored batch_hash
+ * still matches a fresh recomputation — only falling back to a full
+ * per-entry scan for a batch that actually fails. See
+ * verify.service.verifyChainWithMerkle() for the tiered algorithm.
+ *
+ * CAVEAT: only covers logs that have been rolled into a completed
+ * batch. Logs since the last completed batch (a partial, not-yet-10
+ * batch) are not included — this endpoint trades total coverage for
+ * speed. Use GET /verify for a full guarantee including the tail.
+ */
+async function verifyChainFastHandler(req, res, next) {
+  try {
+    const batches = await merkleModel.getAllBatches();
+    const result = await verifyChainWithMerkle(batches, logModel.getLogsInRange);
+ 
+    // Business event logging
+    if (result.status === 'PASS') {
+      logger.info(
+        {
+          result: result.status,
+          entriesVerified: result.entriesVerified,
+          batchesVerified: result.batchesVerified,
+          merkleRoot: result.merkleRoot,
+        },
+        'Fast (merkle) chain verification completed'
+      );
+    } else {
+      logger.error(
+        {
+          result: result.status,
+          entriesVerified: result.entriesVerified,
+          batchesVerified: result.batchesVerified,
+          merkleRoot: result.merkleRoot,
+          brokenEntryId: result.brokenEntryId,
+          brokenBatchId: result.brokenBatchId,
+          reason: result.reason,
+        },
+        'Fast (merkle) chain verification FAILED — tampering detected'
+      );
+    }
+ 
+    return res.status(200).json(result);
+  } catch (err) {
+    return next(err);
+  }
+}
    
 module.exports = {
   getLogWithStatus,
   verifyChain: verifyChainHandler,
+  verifyChainFast: verifyChainFastHandler,
 };
